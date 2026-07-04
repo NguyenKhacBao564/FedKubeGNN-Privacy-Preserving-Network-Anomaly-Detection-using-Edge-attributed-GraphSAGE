@@ -1,15 +1,17 @@
 """
-test_baselines.py — So sánh 4 model edge-classification trên đồ thị thật 34-1.
+test_baselines.py — So sánh 5 model edge-classification trên đồ thị thật 34-1.
 
-Mục đích (Task 1.11)
+Mục đích (Task 1.11 + mở rộng GAT)
     Chứng minh việc dùng đặc trưng cạnh (E-GraphSAGE) tốt hơn các cách
-    không tận dụng đầy đủ đặc trưng cạnh. So sánh 4 model trên CÙNG
+    không tận dụng đầy đủ đặc trưng cạnh. So sánh 5 model trên CÙNG
     đồ thị, CÙNG head, CÙNG seed:
 
         1. E-GraphSAGE          — ghép edge feature vào message().
         2. GCNBaseline          — GCNConv, KHÔNG dùng edge feature.
         3. GraphSAGEBaseline    — SAGEConv, KHÔNG dùng edge feature.
         4. SAGEEdgeConcatBaseline — "nhồi" edge feature vào node input.
+        5. GATBaseline          — GATv2Conv với edge_dim; edge feature
+                                   điều chỉnh attention score.
 
     Với mỗi model:
         * Forward 1 lần, kiểm tra shape [E, 4] và không NaN/Inf.
@@ -46,8 +48,8 @@ LOG_PATH = (
 )
 CFG_PATH = "/Users/nguyen_bao/Projects/AIproject/FedKube-IDS/config.yaml"
 
-# 4 model cần so sánh (phải đúng tên `build_model` chấp nhận).
-MODEL_TYPES = ["egraphsage", "gcn", "graphsage", "sage_edge_concat"]
+# 5 model cần so sánh (phải đúng tên `build_model` chấp nhận).
+MODEL_TYPES = ["egraphsage", "gat", "gcn", "graphsage", "sage_edge_concat"]
 
 
 def _count_params(model: torch.nn.Module) -> int:
@@ -81,7 +83,7 @@ def main():
     if not os.path.isfile(CFG_PATH):
         raise FileNotFoundError(f"Không tìm thấy config: {CFG_PATH}")
 
-    # ---- 1) Pipeline dữ liệu (CHỈ chạy MỘT LẦN cho cả 4 model) ----
+    # ---- 1) Pipeline dữ liệu (CHỈ chạy MỘT LẦN cho cả 5 model) ----
     from sklearn.model_selection import train_test_split
     from src.data_io import load_scenario
     from src.preprocess import clean_flows, fit_preprocessor, transform
@@ -200,7 +202,7 @@ def main():
     # ---- 4) Bảng so sánh ----
     print()
     print("=" * 70)
-    print(" BẢNG SO SÁNH 4 MODEL (cùng đồ thị 34-1, cùng seed 42, cùng head)")
+    print(" BẢNG SO SÁNH 5 MODEL (cùng đồ thị 34-1, cùng seed 42, cùng head)")
     print("=" * 70)
     # Trục cột:
     header = f"  {'Model':<22s}  {'#Params':>10s}  {'Loss':>10s}  {'Fwd (ms)':>10s}"
@@ -219,6 +221,7 @@ def main():
     gcn = next(r for r in results if r["model_type"] == "gcn")
     sage = next(r for r in results if r["model_type"] == "graphsage")
     sec = next(r for r in results if r["model_type"] == "sage_edge_concat")
+    gat = next(r for r in results if r["model_type"] == "gat")
 
     print()
     print("  Ghi chú cho báo cáo:")
@@ -226,11 +229,17 @@ def main():
         f"    • E-GraphSAGE có {egs['n_params']:,} param "
         f"({egs['n_params']/gcn['n_params']:.1f}x GCN, "
         f"{egs['n_params']/sage['n_params']:.1f}x GraphSAGE, "
-        f"{egs['n_params']/sec['n_params']:.1f}x SAGE+EdgeConcat)."
+        f"{egs['n_params']/sec['n_params']:.1f}x SAGE+EdgeConcat, "
+        f"{egs['n_params']/gat['n_params']:.1f}x GAT)."
     )
     print(
         "      Phần dư đến từ lin_msg(in_dim + edge_dim) và "
         "lin_upd(in_dim + out_dim) trong mỗi EGraphSAGELayer."
+    )
+    print(
+        f"    • GAT có {gat['n_params']:,} param — nhiều nhất trong các "
+        f"baseline vì ``heads`` lần ma trận trọng số + thêm ``lin_edge(edge_dim → "
+        f"heads*out_channels)``."
     )
     print(
         "    • Loss chưa có ý nghĩa so sánh (model chưa train) — chỉ dùng để"
@@ -242,7 +251,7 @@ def main():
     # ---- Tổng kết ----
     print()
     print("=" * 70)
-    print("ALL CHECKS PASSED — cả 4 model build + forward + backward OK.")
+    print("ALL CHECKS PASSED — cả 5 model build + forward + backward OK.")
     print(f"Tổng thời gian: {time.perf_counter() - t_total:.2f}s")
     print()
     print("Bước tiếp theo: train từng model với cùng seed/hyperparam, đánh giá")

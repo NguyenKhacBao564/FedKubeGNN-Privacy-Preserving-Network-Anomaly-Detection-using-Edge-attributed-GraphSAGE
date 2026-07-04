@@ -368,11 +368,11 @@ def run_comparison(
     """
     # ---- Defaults ----
     if models is None:
-        models = ["egraphsage", "sage_edge_concat", "graphsage", "gcn"]
+        models = ["egraphsage", "gat", "sage_edge_concat", "graphsage", "gcn"]
     if imbalance_modes is None:
         imbalance_modes = ["none", "class_weight", "undersample"]
 
-    valid_models = {"egraphsage", "gcn", "graphsage", "sage_edge_concat"}
+    valid_models = {"egraphsage", "gcn", "graphsage", "sage_edge_concat", "gat"}
     bad_m = [m for m in models if m not in valid_models]
     if bad_m:
         raise ValueError(
@@ -622,8 +622,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--models", nargs="+",
-        default=["egraphsage", "sage_edge_concat", "graphsage", "gcn"],
-        choices=["egraphsage", "gcn", "graphsage", "sage_edge_concat"],
+        default=["egraphsage", "gat", "sage_edge_concat", "graphsage", "gcn"],
+        choices=["egraphsage", "gcn", "graphsage", "sage_edge_concat", "gat"],
         help="Danh sách model cần so sánh.",
     )
     p.add_argument(

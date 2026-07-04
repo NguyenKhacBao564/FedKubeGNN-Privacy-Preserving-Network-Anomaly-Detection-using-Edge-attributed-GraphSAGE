@@ -1,8 +1,8 @@
 """
-model.py — E-GraphSAGE (chính) + 3 baseline đối chứng cho EDGE classification.
+model.py — E-GraphSAGE (chính) + 4 baseline đối chứng cho EDGE classification.
 
 Mục tiêu: chứng minh việc dùng đặc trưng cạnh (E-GraphSAGE) tốt hơn các
-cách không tận dụng đầy đủ đặc trưng cạnh. Tất cả 4 model cùng bài toán
+cách không tận dụng đầy đủ đặc trưng cạnh. Tất cả 5 model cùng bài toán
 edge classification, cùng head, chỉ khác phần sinh embedding node.
 
 1. E-GraphSAGE (Task 1.9, độ khó ★★★★★)
@@ -26,7 +26,16 @@ edge classification, cùng head, chỉ khác phần sinh embedding node.
    feature. Đây là bản "gần đúng" E-GraphSAGE mà không sửa `message()`.
    Thường kém hơn E-GraphSAGE vì mất locality + mất per-edge.
 
-Quy ước so sánh: cả 4 model dùng CHUNG head
+5. Baseline GAT (Graph Attention, `GATBaseline`)
+   Dùng `GATv2Conv` có sẵn của PyG VỚI tham số ``edge_dim``. Đây là
+   "cách thứ ba" để tận dụng edge feature: cơ chế attention khi tính
+   trọng số message sẽ tham chiếu ``edge_attr`` của từng cạnh. Nhiều
+   head song song (mặc định 4) cho đủ sức biểu diễn; layer cuối
+   ``concat=False`` để gom chiều về ``hidden_dim`` rồi đưa vào head.
+   Khác E-GraphSAGE: thay vì CONCAT edge vào message, GAT dùng edge để
+   ĐIỀU CHỈNH TRỌNG SỐ attention trên message node→node.
+
+Quy ước so sánh: cả 5 model dùng CHUNG head
 `concat[h_u, h_v, edge_attr_goc] → Linear → ReLU → Dropout → Linear → num_classes`
 — chỉ khác phần sinh embedding node. Đảm bảo so sánh công bằng (mọi
 khác biệt đến từ cách xử lý edge feature trong message passing).
@@ -37,7 +46,7 @@ không hardcode `.cuda()`.
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import MessagePassing, GCNConv, SAGEConv
+from torch_geometric.nn import GATv2Conv, GCNConv, MessagePassing, SAGEConv
 from torch_geometric.utils import scatter
 
 
@@ -632,6 +641,180 @@ class SAGEEdgeConcatBaseline(torch.nn.Module):
         return logits
 
 
+class GATBaseline(torch.nn.Module):
+    """
+    Baseline GAT v2 cho **edge classification** — dùng GATv2Conv có sẵn.
+
+    Đặc điểm nổi bật so với các baseline khác
+    ------------------------------------------
+    GATv2Conv(..., edge_dim=F) chấp nhận đặc trưng cạnh và DÙNG NÓ
+    khi tính attention score (không giống GCN/SAGE gốc — bỏ qua edge).
+    Cú pháp:
+
+        α_{ij} = softmax_j(LeakyReLU(aᵀ [W·h_i || W·e_{ij} || W·h_j]))
+
+    Vì vậy edge_attr được đưa vào QUYẾT ĐỊNH BAO NHIÊU THÔNG TIN từ
+    node j truyền sang node i, theo từng cạnh (per-edge, không gộp như
+    SAGEEdgeConcatBaseline). Vẫn khác E-GraphSAGE ở chỗ: E-GraphSAGE
+    CONCAT edge vào message trước khi đưa qua Linear; GAT dùng edge để
+    RE-WEIGHT message gốc (không trộn thông tin).
+
+    Kiến trúc (đã chốt)
+    -------------------
+    Stack GATv2Conv với chiến lược chiều:
+
+        Layer 0   : GATv2Conv(node_in_dim, hidden_dim, heads=heads,
+                                  concat=True, edge_dim=F) ⇒ output
+                                  [N, hidden_dim * heads].
+        Layer 1..num_layers-2 (giữa): cùng cấu hình nhưng
+                      in_channels = hidden_dim * heads.
+        Layer cuối (num_layers ≥ 2) : cùng cấu hình nhưng
+                      concat=False ⇒ output [N, hidden_dim]
+                      (mean qua các head).
+        num_layers=1                : 1 layer với concat=False để ra
+                      hidden_dim trực tiếp (corner case).
+
+    Khác E-GraphSAGE/GCN/SAGE ở chỗ: 2 layer đầu dùng concat=True
+    (multi-head) ⇒ số chiều = hidden_dim * heads. Layer cuối mean
+    qua các head về hidden_dim để khớp input của head classifier.
+
+    Phân loại vẫn chỉ trên E cạnh GỐC (không phải 2E cạnh MP) qua head
+    GIỐNG các model khác: concat[h_u, h_v, edge_attr(gốc)] → MLP.
+
+    Args
+    ----
+    edge_dim, num_classes, node_in_dim, hidden_dim, num_layers, dropout:
+        cùng chữ ký với các model khác.
+    heads : int, mặc định 4
+        Số head attention cho MỖI layer (trừ layer cuối nếu có thể, layer
+        cuối cũng dùng heads head nhưng concat=False để mean).
+
+    Lưu ý
+    -----
+    - GAT có nhiều tham số hơn các baseline khác vì:
+        (a) heads lần các ma trận trọng số cho node features.
+        (b) thêm lin_edge = Linear(edge_dim, heads * out_channels).
+        (c) vector attention att_src, att_dst, att_edge.
+    - PyG’s GATv2Conv có sẵn dropout attention (mặc định 0.0) —
+      để 0.0 cho reproducibility. Dropout model-level đặt giữa các
+      layer qua self.dropout_between.
+    - Cùng head classifier với 4 model kia để so sánh công bằng.
+    """
+
+    def __init__(self, edge_dim: int, num_classes: int,
+                 node_in_dim: int = 1, hidden_dim: int = 64,
+                 num_layers: int = 2, dropout: float = 0.5,
+                 heads: int = 4):
+        super().__init__()
+
+        if num_layers < 1:
+            raise ValueError(f"GATBaseline: num_layers={num_layers} < 1.")
+        if hidden_dim < 1:
+            raise ValueError(f"GATBaseline: hidden_dim={hidden_dim} < 1.")
+        if edge_dim < 1:
+            raise ValueError(f"GATBaseline: edge_dim={edge_dim} < 1.")
+        if num_classes < 1:
+            raise ValueError(f"GATBaseline: num_classes={num_classes} < 1.")
+        if heads < 1:
+            raise ValueError(f"GATBaseline: heads={heads} < 1.")
+
+        self.edge_dim = edge_dim
+        self.num_classes = num_classes
+        self.node_in_dim = node_in_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout_p = dropout
+        self.heads = heads
+
+        self.dropout_between = nn.Dropout(p=dropout)
+
+        # ----- GATv2Conv stack -----
+        # PyG chú ý: truyền edge_attr=data.edge_attr_mp cho message
+        # passing (2E cạnh MP).
+        self.layers = nn.ModuleList()
+        if num_layers == 1:
+            # 1 layer duy nhất — phải concat=False để output ra hidden_dim.
+            self.layers.append(
+                GATv2Conv(node_in_dim, hidden_dim, heads=heads,
+                          concat=False, edge_dim=edge_dim,
+                          dropout=0.0)
+            )
+        else:
+            # Layer 0: node feature → multi-head concat (hidden_dim * heads).
+            self.layers.append(
+                GATv2Conv(node_in_dim, hidden_dim, heads=heads,
+                          concat=True, edge_dim=edge_dim,
+                          dropout=0.0)
+            )
+            # Layers giữa (nếu có): vẫn concat=True.
+            for _ in range(num_layers - 2):
+                self.layers.append(
+                    GATv2Conv(hidden_dim * heads, hidden_dim, heads=heads,
+                              concat=True, edge_dim=edge_dim,
+                              dropout=0.0)
+                )
+            # Layer cuối: concat=False để mean các head về hidden_dim.
+            self.layers.append(
+                GATv2Conv(hidden_dim * heads, hidden_dim, heads=heads,
+                          concat=False, edge_dim=edge_dim,
+                          dropout=0.0)
+            )
+
+        # ----- Edge classification head (GIỐNG 4 model khác) -----
+        head_in_dim = hidden_dim * 2 + edge_dim
+        self.head = nn.Sequential(
+            nn.Linear(head_in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Khai báo trọng số Linear khởi tạo theo He.
+
+        CHÚ Ý: PyG's GATv2Conv có lin_src / lin_dst / lin_edge
+        cũng là nn.Linear, nên chúng bị override theo cùng quy ước với
+        4 baseline khác. Các Parameter thuần (không phải Linear) như
+        att_src, att_dst, att_edge KHÔNG bị override ở đây.
+        """
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_uniform_(m.weight, nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, data) -> torch.Tensor:
+        """Forward cho edge classification. Trả về [E, num_classes].
+
+        Message passing dùng edge_index_mp ([2, 2E]) + edge_attr_mp
+        ([2E, F]); classification chỉ trên E cạnh GỐC.
+        """
+        x = data.x                                       # [N, node_in_dim]
+        edge_index_mp = data.edge_index_mp               # [2, 2E]
+        edge_attr_mp = data.edge_attr_mp                 # [2E, F]
+
+        # === MESSAGE PASSING (2E cạnh, cả 2 chiều) ===
+        h = x
+        for layer in self.layers:
+            h = layer(h, edge_index_mp, edge_attr_mp)    # GATv2Conv
+            h = self.dropout_between(h)
+
+        # === EDGE CLASSIFICATION (E cạnh gốc, cùng head 4 model kia) ===
+        edge_index = data.edge_index                     # [2, E]
+        edge_attr = data.edge_attr                       # [E, F]
+        src = edge_index[0]
+        dst = edge_index[1]
+        h_u = h[src]
+        h_v = h[dst]
+        edge_repr = torch.cat([h_u, h_v, edge_attr], dim=-1)  # [E, 2H+F]
+        logits = self.head(edge_repr)                           # [E, num_classes]
+        return logits
+
+
+
+
 def build_model(model_type: str, data, cfg: dict) -> torch.nn.Module:
     """
     Factory: khởi tạo model theo tên, đọc **động** chiều từ ``data``.
@@ -693,7 +876,10 @@ def build_model(model_type: str, data, cfg: dict) -> torch.nn.Module:
         return GraphSAGEBaseline(**common_kwargs)
     if model_type == 'sage_edge_concat':
         return SAGEEdgeConcatBaseline(**common_kwargs)
+    if model_type == 'gat':
+        return GATBaseline(**common_kwargs)
     raise ValueError(
         f"build_model: model_type='{model_type}' không hỗ trợ. "
-        f"Chọn một trong: 'egraphsage', 'gcn', 'graphsage', 'sage_edge_concat'."
+        f"Chọn một trong: 'egraphsage', 'gcn', 'graphsage', "
+        f"'sage_edge_concat', 'gat'."
     )
