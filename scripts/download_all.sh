@@ -133,9 +133,12 @@ _download_benign() {
     return 1
   fi
 
-  # Ưu tiên file plain (không .gz) > .tar.gz > .gz
+  # Ưu tiên file plain (không .gz) > .tar.gz > .gz.
+  # Regex PHẢI anchor `^` — nếu không thì `sort -u` Alphabet sẽ xếp
+  # bản "<scenario>.conn.log.labeled" (có prefix) LÊN TRƯỚC `conn.log.labeled`
+  # thuần → `head -n 1` chọn NHẦM file có prefix.
   local link=""
-  link="$(echo "${found}" | grep -E '/?conn\.log\.labeled$' | head -n 1 || true)"
+  link="$(echo "${found}" | grep -E '^/?conn\.log\.labeled(\.(tar\.)?gz)?$' | head -n 1 || true)"
   [[ -z "${link}" ]] && link="$(echo "${found}" | grep -E '\.tar\.gz$' | head -n 1 || true)"
   [[ -z "${link}" ]] && link="$(echo "${found}" | grep -E '\.gz$' | head -n 1 || true)"
   [[ -z "${link}" ]] && link="$(echo "${found}" | head -n 1)"
@@ -171,7 +174,10 @@ _download_benign() {
     sz="$(du -h "${final_file}" | cut -f1)"
     echo "    [SIZE] ${final_file}  (${sz})"
   else
-    echo "    [WARN] Không thấy ${final_file} sau khi xử lý — kiểm tra thủ công." >&2
+    # In cả ``name`` + ``final_file`` + ``out_file`` (file đã tải về) để
+    # tránh nhầm scenario khi log nhiều cái liên tiếp.
+    echo "    [WARN] [${name}] Không thấy ${final_file} sau khi xử lý — kiểm tra thủ công." >&2
+    echo "    [WARN] [${name}] Đã tải về: ${out_file:-<không có>}" >&2
     return 1
   fi
   return 0
@@ -246,6 +252,7 @@ while IFS= read -r line; do
     rel="${path#data/}"
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "    [TYPE] BENIGN → base ${BENIGN_BASE}"
+      echo "    [DRY-RUN] expected final path: ${path}"
     fi
     if _download_benign "${name}" "${rel}"; then
       COUNT_OK=$((COUNT_OK + 1))
@@ -260,6 +267,7 @@ while IFS= read -r line; do
     COUNT_MALWARE=$((COUNT_MALWARE + 1))
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "    [TYPE] MALWARE → sẽ ủy quyền scripts/download_data.sh --apply"
+      echo "    [DRY-RUN] expected final path: ${path}"
     fi
     # Ủy quyền cho download_data.sh. Tạm thời file đã có sẽ được skip.
     if [[ "${DRY_RUN}" == "0" ]]; then

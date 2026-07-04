@@ -98,12 +98,17 @@ find_conn_log_link() {
   fi
 
   # Ưu tiên file "plain" (không có prefix tên scenario phía trước) — đây
-  # là file đúng định dạng Zeek cần cho parser. Một số scenario có thêm
-  # bản "<tên_scenario>.conn.log.labeled" nhưng KHÔNG dùng định dạng đó.
+  # là file đúng định dạng Zeek cần cho parser. Một số scenario (vd 1-1)
+  # có thêm bản "<tên_scenario>.conn.log.labeled" mà ta KHÔNG dùng.
+  #
+  # Regex PHẢI anchor `^` để chỉ match basename bắt đầu bằng `conn.log.labeled`
+  # (cho phép thêm 1 dấu `/` ở đầu). Không anchor thì `sort -u` xếp Alphabet
+  # sẽ đưa bản có prefix ("CTU-IoT-Malware-1-1.conn.log.labeled") lên trước
+  # `conn.log.labeled` thuần → `head -n 1` chọn NHẦM file có prefix.
   local link=""
-  link="$(echo "${found}" | grep -E '/?conn\.log\.labeled(\.(tar\.)?gz)?$' | head -n 1 || true)"
+  link="$(echo "${found}" | grep -E '^/?conn\.log\.labeled(\.(tar\.)?gz)?$' | head -n 1 || true)"
   if [[ -z "${link}" ]]; then
-    # Ưu tiên .tar.gz > .gz > không nén cho các file có prefix
+    # Fallback: vẫn ưu tiên .tar.gz > .gz > không nén cho các file có prefix
     link="$(echo "${found}" | grep -E '\.tar\.gz$' | head -n 1 || true)"
   fi
   if [[ -z "${link}" ]]; then
@@ -222,7 +227,9 @@ for SCEN in "${SCENARIOS[@]}"; do
     SIZE="$(du -h "${FINAL_FILE}" | cut -f1)"
     echo "    [SIZE] ${FINAL_FILE}  (${SIZE})"
   else
-    echo "    [WARN] Không thấy ${FINAL_FILE} sau khi xử lý — kiểm tra thủ công." >&2
+    # In cả SCEN + FINAL_FILE để tránh nhầm khi log nhiều scenario.
+    echo "    [WARN] [${SCEN}] Không thấy ${FINAL_FILE} sau khi xử lý — kiểm tra thủ công." >&2
+    echo "    [WARN] [${SCEN}] Đã tải về: ${OUT_FILE:-<không có>}" >&2
   fi
 done
 
