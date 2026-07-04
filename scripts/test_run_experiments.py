@@ -47,7 +47,7 @@ os.chdir(REPO_ROOT)
 LOG_34_1 = REPO_ROOT + "/data/CTU-IoT-Malware-Capture-34-1/conn.log.labeled"
 LOG_3_1 = REPO_ROOT + "/data/CTU-IoT-Malware-Capture-3-1/conn.log.labeled"
 CFG_PATH = REPO_ROOT + "/config.yaml"
-OUT_DIR = REPO_ROOT + "/artifacts/experiments"
+OUT_DIR = REPO_ROOT + "/artifacts/phase1_results"
 
 # Smoke-test parameters (NGẮN để chạy local nhanh).
 EPOCHS = 30

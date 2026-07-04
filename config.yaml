@@ -148,4 +148,4 @@ experiments:
 
   # Thư mục output (CSV + confusion matrix PNG + checkpoint).
   # run_experiments sẽ tạo thêm sub-dir ``checkpoints/`` bên trong.
-  out_dir: artifacts/experiments
+  out_dir: artifacts/phase1_results

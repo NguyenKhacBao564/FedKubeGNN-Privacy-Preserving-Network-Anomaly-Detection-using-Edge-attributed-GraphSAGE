@@ -4,8 +4,20 @@
 
 # --- Dữ liệu thô & file trung gian ---
 data/
-artifacts/
 checkpoints/
+artifacts/*          # ignore mọi thứ TRONG artifacts/
+
+# --- Ngoại lệ: track kết quả cuối cùng GĐ1 ---
+!artifacts/phase1_results/
+!artifacts/eda_summary.csv
+artifacts/phase1_results/*   # re-ignore tất cả trong phase1_results/
+# cho phép lại các file CSV + confusion matrix PNG:
+!artifacts/phase1_results/results_summary.csv
+!artifacts/phase1_results/phase_a_*.csv
+!artifacts/phase1_results/phase_b_*.csv
+!artifacts/phase1_results/checkpoints/
+artifacts/phase1_results/checkpoints/*   # re-ignore nội dung checkpoints/
+!artifacts/phase1_results/checkpoints/*.png  # cho phép PNG confusion matrix
 
 # --- Artifact nhị phân ---
 *.pt

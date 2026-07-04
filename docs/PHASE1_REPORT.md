@@ -4,7 +4,7 @@
 > *Phát hiện hành vi độc hại trong Kubernetes bằng Federated Learning + GNN trên bộ dữ liệu IoT-23*
 >
 > Giai đoạn 1 do **Nguyễn Khắc Bảo** phụ trách.
-> Kết quả thực nghiệm cuối cùng: `artifacts/experiments2/results_summary.csv`
+> Kết quả thực nghiệm cuối cùng: `artifacts/phase1_results/results_summary.csv`
 
 ---
 
@@ -210,5 +210,5 @@ Class_weight luôn cho macro-F1 cao nhất và hội tụ nhanh nhất (best_epo
 
 ---
 
-*Báo cáo này dựa trên kết quả thực nghiệm cuối cùng: `artifacts/experiments2/results_summary.csv`*
+*Báo cáo này dựa trên kết quả thực nghiệm cuối cùng: `artifacts/phase1_results/results_summary.csv`*
 *Model chính: `src/model.py` (EGraphSAGE), chạy trên vast.ai GPU (RTX 3090/4090)*

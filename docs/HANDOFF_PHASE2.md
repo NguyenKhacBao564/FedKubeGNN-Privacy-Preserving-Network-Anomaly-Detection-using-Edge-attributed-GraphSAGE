@@ -161,5 +161,5 @@ LOSO macro-F1:   0.2334  (tổng quát hóa - thấp do private classes)
 
 ---
 
-*Tài liệu này được tạo dựa trên kết quả GĐ1: `artifacts/experiments2/results_summary.csv`*
+*Tài liệu này được tạo dựa trên kết quả GĐ1: `artifacts/phase1_results/results_summary.csv`*
 *Chi tiết kỹ thuật: xem `docs/PHASE1_REPORT.md`*

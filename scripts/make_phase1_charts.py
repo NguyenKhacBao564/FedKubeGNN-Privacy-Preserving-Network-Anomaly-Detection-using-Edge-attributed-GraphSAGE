@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tạo biểu đồ tổng hợp cho PHASE1_REPORT.md.
 
-Đọc artifacts/experiments2/results_summary.csv, xuất ra:
+Đọc artifacts/phase1_results/results_summary.csv, xuất ra:
   - docs/figures/pooled_phase_b_models.png  : bar chart so sánh 5 model trên pooled
   - docs/figures/loso_phase_b_models.png    : bar chart so sánh 5 model trên LOSO
   - docs/figures/loso_egraphsage_by_scenario.png : bar chart LOSO theo từng scenario
@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(__file__).resolve().parents[1]
-CSV_PATH = REPO / "artifacts/experiments2/results_summary.csv"
+CSV_PATH = REPO / "artifacts/phase1_results/results_summary.csv"
 FIG_DIR = REPO / "docs/figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 

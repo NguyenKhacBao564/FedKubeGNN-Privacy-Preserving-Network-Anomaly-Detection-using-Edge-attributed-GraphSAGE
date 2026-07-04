@@ -16,7 +16,7 @@ Chạy
 Test gồm 2 bước:
 
 [BƯỚC 1] Chạy 1 mini-orchestrator (cap=500, epochs=2, 2 protocol {per_scenario,
-        pooled}) → tạo artifacts/experiments với summary cho ~16 configs.
+        pooled}) → tạo artifacts/phase1_results với summary cho ~16 configs.
 [BƯỚC 2] Gọi lại cùng args nhưng với ``resume_from_summary=True``.
         Kỳ vọng: skip_keys phủ đúng số dòng summary hiện có; các config
         còn lại được train nhanh; tổng số dòng summary cuối cùng GẤP ĐÔI
@@ -185,7 +185,7 @@ def main() -> None:
     print(f"  Δt         : {dt_b - dt_a:+.1f}s (âm = resume nhanh hơn)")
     print()
     print("  → Sau test, dọn artifacts/experiments_resume_test/. "
-          "(KHÔNG ảnh hưởng artifacts/experiments/ chính).")
+          "(KHÔNG ảnh hưởng artifacts/phase1_results/ chính).")
 
 
 if __name__ == "__main__":

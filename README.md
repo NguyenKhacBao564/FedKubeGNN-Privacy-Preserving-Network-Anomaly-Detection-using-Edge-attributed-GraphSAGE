@@ -21,7 +21,8 @@ so sánh.
 ├── config.yaml                # cấu hình trung tâm: scenario, đường dẫn, hyperparameter
 ├── data/                      # conn.log.labeled tải về (gitignore)
 ├── artifacts/                 # file trung gian đã xử lý (gitignore)
-│   └── experiments/           # CSV + PNG + checkpoint của orchestrator
+│   ├── phase1_results/        # kết quả GĐ1: CSV + PNG + checkpoint
+│   └── eda_summary.csv        # EDA summary (được track)
 ├── checkpoints/               # model đã train (gitignore)
 ├── scripts/
 │   ├── download_data.sh       # wget 1 file conn.log.labeled (helper của download_all.sh)
@@ -191,7 +192,7 @@ Script tự động:
 
 ```bash
 # Trên vast.ai (hoặc local sau khi git pull):
-ls -la artifacts/experiments/
+ls -la artifacts/phase1_results/
 #   ├── results_summary.csv       ← bảng tổng hợp cuối cùng
 #   ├── phase_a_<proto>_egraphsage_3modes.csv      ← Phase A mỗi protocol
 #   ├── phase_b_<proto>_mode-<mode>_5models.csv   ← Phase B mỗi protocol
@@ -212,7 +213,7 @@ ls -la artifacts/experiments/
   đảm bảo không train lại config đã xong.
 - **Nếu muốn chạy lại TỪ ĐẦU** (vd sau khi chỉnh hyperparam):
   ```bash
-  rm -rf artifacts/experiments/
+  rm -rf artifacts/phase1_results/
   bash scripts/run_full_gpu.sh
   ```
 

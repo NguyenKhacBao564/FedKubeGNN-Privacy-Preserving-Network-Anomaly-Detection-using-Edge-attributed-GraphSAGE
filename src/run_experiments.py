@@ -1196,7 +1196,7 @@ def run_all(
     epochs_override: Optional[int] = None,
     patience_override: Optional[int] = None,
     seed: Optional[int] = None,
-    out_dir: str = "artifacts/experiments",
+    out_dir: str = "artifacts/phase1_results",
     verbose: bool = True,
     resume_from_summary: bool = False,
 ) -> pd.DataFrame:
@@ -1586,7 +1586,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         if args.seed is not None
         else int(cfg.get("reproducibility", {}).get("seed", 42))
     )
-    out_dir = args.out_dir or exp_cfg.get("out_dir") or "artifacts/experiments"
+    out_dir = args.out_dir or exp_cfg.get("out_dir") or "artifacts/phase1_results"
     protocols = args.protocols or list(exp_cfg.get("protocols") or PROTOCOLS)
 
     run_all(
