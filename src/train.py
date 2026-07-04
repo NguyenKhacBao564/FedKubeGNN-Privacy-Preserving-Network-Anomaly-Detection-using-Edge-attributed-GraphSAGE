@@ -622,6 +622,7 @@ def train_model(
     best_val_f1 = -1.0
     best_epoch = -1
     bad_epochs = 0
+    final_epoch = 0
     best_state: Optional[Dict[str, torch.Tensor]] = None
 
     if verbose:
@@ -631,6 +632,7 @@ def train_model(
         )
 
     for epoch in range(1, epochs + 1):
+        final_epoch = epoch
         # ---- Train 1 epoch ----
         train_loss = train_one_epoch(
             model, data, train_mask, criterion, optimizer, device, grad_clip,
@@ -714,7 +716,7 @@ def train_model(
             'best_epoch': int(best_epoch),
             'best_val_f1': float(best_val_f1),
             'test_f1': float(test_f1),
-            'final_epoch': int(epoch),
+            'final_epoch': int(final_epoch),
             'seed': int(seed),
             'train_ratio': train_ratio,
             'val_ratio': val_ratio,
@@ -726,7 +728,7 @@ def train_model(
     history_out['best_val_f1'] = float(best_val_f1)
     history_out['best_epoch'] = int(best_epoch)
     history_out['test_f1'] = float(test_f1)
-    history_out['final_epoch'] = int(epoch)
+    history_out['final_epoch'] = int(final_epoch)
 
     return model, history_out, ckpt_path
 
@@ -856,7 +858,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         '--model', type=str, default='egraphsage',
-        choices=['egraphsage', 'gcn', 'graphsage', 'sage_edge_concat'],
+        choices=['egraphsage', 'gcn', 'graphsage', 'sage_edge_concat', 'gat'],
         help='Loại model (mặc định: egraphsage).',
     )
     p.add_argument(

@@ -512,6 +512,7 @@ def run_comparison(
                 seed=seed,
             )
             test_mask = test_mask.to(device)
+            data = data.to(device)
 
             # ---- Evaluate ----
             metrics = evaluate_model(

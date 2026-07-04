@@ -75,7 +75,7 @@ training:
   batch_size: 32        # full-batch trong GĐ1; giữ để tương thích GĐ2/GĐ3.
   weight_decay: 0.0     # L2 regularization; thường để 0 cho baseline.
   grad_clip: 1.0        # clip norm để tránh exploding gradient khi loss mất cân bằng.
-  early_stop_patience: 10
+  early_stop_patience: 20
   optimizer: adam       # "adam" | "adamw"
   # Tỉ lệ split edge masks (per scenario, transductive). Áp dụng cho cả
   # protocol per_scenario và pooled (mỗi graph trong pool tự split với
@@ -111,8 +111,9 @@ experiments:
   # dùng CHUNG max_epochs + patience + seed + split (công bằng).
   # Baseline đơn giản tự hội tụ sớm & dừng; phức tạp chạy lâu hơn.
   # 150 epoch đủ cho dataset ~5K-10K dòng/lớp trên GPU vast.ai (RTX 3090).
+  # LƯU Ý: patience KHÔNG nằm ở đây — đọc từ ``training.early_stop_patience``
+  # để có 1 nguồn duy nhất.
   max_epochs: 150
-  patience: 20
 
   # Cap số flow mỗi lớp khi load (giúp RAM ổn với file lớn như 39-1 ~10GB).
   # None = đọc nguyên. Trên smoke test local, đặt nhỏ để chạy nhanh.

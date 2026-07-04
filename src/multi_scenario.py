@@ -438,6 +438,7 @@ def run_loso(
     cap_per_class: Optional[int] = None,
     chunksize: int = 200_000,
     epochs_override: Optional[int] = None,
+    patience_override: Optional[int] = None,
     val_ratio: float = 0.10,
     seed: Optional[int] = None,
     out_dir: str = "artifacts/loso",
@@ -495,6 +496,9 @@ def run_loso(
         Chunk size khi cap_per_class != None.
     epochs_override : int | None
         Override số epoch (mặc định từ ``config.yaml``).
+    patience_override : int | None
+        Override early-stopping patience (mặc định từ ``config.yaml``
+        ``training.early_stop_patience``, fallback 10).
     val_ratio : float
         Tỉ lệ VAL mask per train graph (mặc định 0.10).
     seed : int | None
@@ -769,6 +773,11 @@ def run_loso(
             if epochs_override is not None
             else tr_cfg.get("epochs", 50)
         )
+        patience = int(
+            patience_override
+            if patience_override is not None
+            else tr_cfg.get("early_stop_patience", 10)
+        )
 
         criterion = make_criterion(
             imbalance_mode, weight_tensor=weight_tensor, device=device,
@@ -784,6 +793,7 @@ def run_loso(
         # ---- 10) Training loop ----
         best_val_f1 = -1.0
         best_epoch = -1
+        bad_epochs = 0
         best_state: Optional[Dict[str, torch.Tensor]] = None
         history = {
             "epoch": [],
@@ -845,6 +855,19 @@ def run_loso(
                     k: v.detach().cpu().clone()
                     for k, v in model.state_dict().items()
                 }
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+
+            if bad_epochs >= patience:
+                if verbose:
+                    print(
+                        f"  [LOSO|{held_out}|{model_name}|{imbalance_mode}]  "
+                        f"early-stop tại epoch {epoch} "
+                        f"(best_val={best_val_f1:.4f} @ epoch {best_epoch}, "
+                        f"patience={patience})."
+                    )
+                break
 
         # ---- Restore best ----
         if best_state is not None:
@@ -1035,6 +1058,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Override số epoch (mặc định: từ config.yaml).",
     )
     p.add_argument(
+        "--patience", type=int, default=None,
+        help=(
+            "Override early-stopping patience "
+            "(mặc định: training.early_stop_patience trong config.yaml)."
+        ),
+    )
+    p.add_argument(
         "--seed", type=int, default=None,
         help="Override seed (mặc định: từ config.yaml).",
     )
@@ -1081,6 +1111,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         chunksize=args.chunksize,
         val_ratio=args.val_ratio,
         epochs_override=args.epochs,
+        patience_override=args.patience,
         seed=args.seed,
         out_dir=args.out_dir,
         verbose=not args.quiet,

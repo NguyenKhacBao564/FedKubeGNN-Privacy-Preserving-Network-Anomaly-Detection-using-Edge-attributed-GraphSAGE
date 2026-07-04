@@ -529,11 +529,12 @@ def run_per_scenario(
         else:
             data = _build_one_graph()
 
-        # weight_tensor nếu class_weight
+        # weight_tensor nếu class_weight — lấy labels từ transform()
         wt: Optional[torch.Tensor] = None
         if imbalance_mode == "class_weight":
+            _df_feat = transform(all_dfs[sname], preprocessor)
             wt = _build_weight_tensor(
-                df_for_graph["detailed-label"].astype(str).tolist(),
+                _df_feat["detailed-label"].astype(str).tolist(),
                 class_to_idx, K,
             )
 
@@ -555,6 +556,7 @@ def run_per_scenario(
             seed=seed,
         )
         device = get_device()
+        data = data.to(device)
         result = evaluate_model(
             model, data, test_mask, class_to_idx, device, verbose=False,
         )
@@ -897,6 +899,7 @@ def run_loso_protocol(
     save_dir: str,
     config_path: str,
     epochs_override: Optional[int] = None,
+    patience_override: Optional[int] = None,
     cap_per_class: Optional[int] = None,
     chunksize: int = 100_000,
     data_cache: Optional[DataCache] = None,
@@ -919,6 +922,7 @@ def run_loso_protocol(
         cap_per_class=cap_per_class,
         chunksize=chunksize,
         epochs_override=epochs_override,
+        patience_override=patience_override,
         val_ratio=cfg.get("training", {}).get("val_ratio", 0.10),
         seed=seed,
         out_dir=save_dir,
@@ -980,6 +984,7 @@ def run_phase_a(
     epochs_override: Optional[int],
     cap_per_class: Optional[int],
     chunksize: int,
+    patience_override: Optional[int] = None,
     skip_keys: Optional[Set[Tuple[str, str, str, str]]] = None,
     data_cache: Optional[DataCache] = None,
 ) -> Tuple[pd.DataFrame, str]:
@@ -1032,6 +1037,7 @@ def run_phase_a(
                 "egraphsage", mode, scenario_paths, cfg,
                 seed=seed, save_dir=save_dir, config_path=config_path,
                 epochs_override=epochs_override,
+                patience_override=patience_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
                 data_cache=data_cache,
             )
@@ -1092,6 +1098,7 @@ def run_phase_b(
     cap_per_class: Optional[int],
     chunksize: int,
     winning_mode: str,
+    patience_override: Optional[int] = None,
     skip_keys: Optional[Set[Tuple[str, str, str, str]]] = None,
     data_cache: Optional[DataCache] = None,
 ) -> pd.DataFrame:
@@ -1139,6 +1146,7 @@ def run_phase_b(
                 m, winning_mode, scenario_paths, cfg,
                 seed=seed, save_dir=save_dir, config_path=config_path,
                 epochs_override=epochs_override,
+                patience_override=patience_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
                 data_cache=data_cache,
             )
@@ -1186,6 +1194,7 @@ def run_all(
     cap_per_class: Optional[int] = None,
     chunksize: int = 100_000,
     epochs_override: Optional[int] = None,
+    patience_override: Optional[int] = None,
     seed: Optional[int] = None,
     out_dir: str = "artifacts/experiments",
     verbose: bool = True,
@@ -1235,6 +1244,7 @@ def run_all(
         print(f"  seed           : {seed}")
         print(f"  cap_per_class  : {cap_per_class}")
         print(f"  epochs_override: {epochs_override}")
+        print(f"  patience       : {patience_override}")
         print(f"  out_dir        : {out_dir}")
         print(f"  ckpt_dir       : {ckpt_dir}")
 
@@ -1340,7 +1350,7 @@ def run_all(
                 protocol, scenario_paths, cfg, pre, class_to_idx,
                 seed=seed, save_dir=ckpt_dir, config_path=config_path,
                 epochs_override=epochs_override, cap_per_class=cap_per_class,
-                chunksize=chunksize,
+                chunksize=chunksize, patience_override=patience_override,
                 skip_keys=skip_keys,
                 data_cache=data_cache,
             )
@@ -1366,6 +1376,7 @@ def run_all(
             seed=seed, save_dir=ckpt_dir, config_path=config_path,
             epochs_override=epochs_override, cap_per_class=cap_per_class,
             chunksize=chunksize, winning_mode=winning_mode,
+            patience_override=patience_override,
             skip_keys=skip_keys,
             data_cache=data_cache,
         )
@@ -1501,6 +1512,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Override số epoch (mặc định từ config['experiments']['max_epochs']).",
     )
     p.add_argument(
+        "--patience", type=int, default=None,
+        help=(
+            "Override early-stopping patience "
+            "(mặc định từ config['training']['early_stop_patience'], fallback 10)."
+        ),
+    )
+    p.add_argument(
         "--seed", type=int, default=None,
         help="Override seed (mặc định từ config).",
     )
@@ -1553,6 +1571,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     if epochs_override is None:
         epochs_override = int(cfg.get("training", {}).get("epochs", 50))
+    # Resolve patience: ưu tiên CLI > training.early_stop_patience (10)
+    # > experiments.patience (legacy alias).
+    patience_override = (
+        args.patience
+        if args.patience is not None
+        else cfg.get("training", {}).get("early_stop_patience")
+    )
+    if patience_override is None:
+        # Fallback an toàn: legacy config key.
+        patience_override = exp_cfg.get("patience")
     seed = (
         args.seed
         if args.seed is not None
@@ -1568,6 +1596,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         cap_per_class=cap_per_class,
         chunksize=args.chunksize,
         epochs_override=int(epochs_override),
+        patience_override=(
+            int(patience_override) if patience_override is not None else None
+        ),
         seed=seed,
         out_dir=out_dir,
         resume_from_summary=args.auto_resume,
