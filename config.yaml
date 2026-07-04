@@ -1,0 +1,92 @@
+# =============================================================
+# IoT-23 FL+GNN — Giai đoạn 1
+# File cấu hình trung tâm: scenario, đường dẫn, hyperparameter.
+# Không hardcode bất cứ giá trị nào trong src/ — đọc từ đây.
+# =============================================================
+
+# -------- 1. Dataset --------
+
+data:
+  # Thư mục chứa file conn.log.labeled tải về bằng scripts/download_data.sh
+  raw_dir: data
+
+  # 6 scenario được chọn cho GĐ1 (đa dạng họ malware, tổng dung lượng nhẹ).
+  # Thứ tự giữ nguyên để đảm bảo label-encoding nhất quán giữa các lần chạy.
+  scenarios:
+    - name: CTU-IoT-Malware-Capture-34-1
+      malware: Mirai
+    - name: CTU-IoT-Malware-Capture-1-1
+      malware: Hide and Seek
+    - name: CTU-IoT-Malware-Capture-3-1
+      malware: Muhstik
+    - name: CTU-IoT-Malware-Capture-9-1
+      malware: Linux.Hajime
+    - name: CTU-IoT-Malware-Capture-36-1
+      malware: Okiru
+    - name: CTU-IoT-Malware-Capture-39-1
+      malware: IRCBot
+
+  # Cột nhãn dùng để train (multi-class). Cột `label` (Benign/Malicious)
+  # chỉ để đối chiếu nhanh, không dùng làm target.
+  target_column: detailed-label
+
+# -------- 2. Đường dẫn artifact --------
+
+paths:
+  artifacts_dir: artifacts
+  checkpoints_dir: checkpoints
+
+  # File trung gian do pipeline preprocess sinh ra (chạy MỘT LẦN trên CPU).
+  processed_file: artifacts/iot23_processed.parquet
+
+  # Đồ thị PyG sau khi dựng (lưu dạng .pt để train đọc lại nhanh).
+  graph_file: artifacts/iot23_graph.pt
+
+  # Scaler & encoder — lưu lại để GĐ2 / GĐ3 dùng lại đúng cách fit trên train.
+  scaler_file: artifacts/scaler.pkl
+  encoder_file: artifacts/encoder.pkl
+
+  # Nơi dump metric / confusion matrix / log.
+  metrics_file: artifacts/metrics.json
+  confusion_matrix_file: artifacts/confusion_matrix.png
+
+# -------- 3. Hyperparameter --------
+
+# Lưu ý:
+#   • GĐ1 gộp toàn bộ flow thành 1 đồ thị tĩnh duy nhất, train full-batch
+#     nên `batch_size` thực tế không được dùng kiểu mini-batch SGD truyền thống.
+#     Giữ trường này để GĐ2 / GĐ3 (chia client, sampler) có sẵn slot.
+#   • Bộ giá trị dưới đây là MẶC ĐỊNH hợp lý để smoke-test; sẽ được tinh chỉnh
+#     sau khi có kết quả tham chiếu.
+
+model:
+  # Loại model: "egraphsage" | "graphsage" | "gcn"
+  #   egraphsage = triển khai đúng E-GraphSAGE (MessagePassing tự viết, ghép edge vào message).
+  #   graphsage  = baseline gốc, edge_attr nối vào node trước khi vào SAGEConv (Phương án B).
+  #   gcn        = baseline GCNConv, edge_attr nối vào embedding 2 đầu cạnh trước classifier.
+  type: egraphsage
+  hidden_dim: 64
+  num_layers: 2
+  dropout: 0.5
+
+training:
+  learning_rate: 0.001
+  epochs: 50
+  batch_size: 32        # full-batch trong GĐ1; giữ để tương thích GĐ2/GĐ3.
+  weight_decay: 0.0     # L2 regularization; thường để 0 cho baseline.
+  grad_clip: 1.0        # clip norm để tránh exploding gradient khi loss mất cân bằng.
+  early_stop_patience: 10
+  optimizer: adam       # "adam" | "adamw"
+
+imbalance:
+  # "class_weight" → dùng weighted CE loss (khuyến nghị).
+  # "undersample"  → undersample lớp đa số TRƯỚC khi dựng đồ thị.
+  # "both"         → kết hợp cả hai.
+  method: class_weight
+
+reproducibility:
+  seed: 42
+
+logging:
+  level: INFO          # DEBUG | INFO | WARNING | ERROR
+  log_every_n_epochs: 1

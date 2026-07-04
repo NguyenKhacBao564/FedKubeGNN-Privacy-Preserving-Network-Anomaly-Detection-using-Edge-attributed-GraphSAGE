@@ -1,0 +1,33 @@
+# =============================================================
+# IoT-23 FL+GNN — Giai đoạn 1 (Baseline GNN tập trung)
+# =============================================================
+# LƯU Ý QUAN TRỌNG VỀ CÀI ĐẶT torch / torch-geometric:
+#
+#   • Ở local (MacBook M2 Pro, Apple Silicon, KHÔNG có CUDA):
+#       Cài bản CPU-only, vì:
+#         (a) MPS của Apple chưa được PyG hỗ trợ ổn định;
+#         (b) Mục đích ở local chỉ là viết code + test trên mẫu nhỏ.
+#         pip install torch --index-url https://download.pytorch.org/whl/cpu
+#         pip install torch-geometric
+#
+#   • Trên vast.ai (Linux + CUDA):
+#       Phải cài torch + torch_scatter + torch_sparse + torch-geometric
+#       đúng phiên bản CUDA của image (cuda 11.8 / 12.1 / 12.x).
+#       Ví dụ cho CUDA 12.1:
+#         pip install torch --index-url https://download.pytorch.org/whl/cu121
+#         pip install torch-geometric
+#         pip install torch_scatter torch_sparse -f https://data.pyg.org/whl/torch-2.x.x+cu121.html
+#       Tra cứu wheel chính xác tại https://pytorch.org/get-started/locally/
+#       và https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html
+#
+# Các package bên dưới là phiên bản tối thiểu đã chốt; có thể nâng khi cần.
+# =============================================================
+
+torch>=2.1.0
+torch-geometric>=2.5.0
+
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+pyyaml>=6.0
+matplotlib>=3.7.0

@@ -1,0 +1,66 @@
+# =====================================================
+# IoT-23 FL+GNN — Giai đoạn 1
+# =====================================================
+
+# --- Dữ liệu thô & file trung gian ---
+data/
+artifacts/
+checkpoints/
+
+# --- Artifact nhị phân ---
+*.pt
+*.pth
+*.parquet
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# --- Môi trường ảo ---
+.venv/
+venv/
+env/
+
+# --- Python cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS rác ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- Log & file tạm ---
+*.log
+*.tmp
+*.bak
+nohup.out
+
+# --- Secrets / Env ---
+.env
+.env.*
+!.env.example
+
+# --- Jupyter / Notebooks ---
+.ipynb_checkpoints/
+
+# --- Explicitly allowed files ---
+!CLAUDE.md
+!README.md
