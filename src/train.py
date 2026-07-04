@@ -72,6 +72,7 @@ __all__ = [
     "set_seed",
     "get_device",
     "split_edge_masks",
+    "safe_stratified_split",
     "macro_f1",
     "make_criterion",
     "train_one_epoch",
@@ -115,6 +116,138 @@ def get_device() -> torch.device:
 # Edge mask (transductive split)
 # ---------------------------------------------------------------------------
 
+def safe_stratified_split(
+    idx_pool: np.ndarray,
+    y_pool: np.ndarray,
+    test_size: float,
+    seed: int,
+    *,
+    context: str = "",
+    force_into_first: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Wrapper quanh ``sklearn.train_test_split`` chịu được lớp CỰC HIẾM.
+
+    Vấn đề
+    -------
+    Một số scenario IoT-23 (vd Okiru) có lớp chỉ 1-3 flow toàn dataset.
+    ``train_test_split(..., stratify=y)`` raise ``ValueError: The least
+    populated classes in y have only 1 member`` nếu BẤT KỲ lớp nào có
+    < 2 mẫu. Đây là giới hạn của dữ liệu, KHÔNG phải lỗi code.
+
+    Hành vi
+    -------
+    1. Đếm số mẫu mỗi lớp. Nếu MỌI lớp đều có >= 2 mẫu → stratified
+       (giống cũ).
+    2. Nếu có lớp < 2 mẫu → fallback ``stratify=None`` (random split)
+       VÀ in cảnh báo liệt kê lớp nào quá hiếm + số mẫu (để ghi báo cáo).
+    3. Nếu ``force_into_first`` được cung cấp (vd các mẫu singleton),
+       ép CHÚNG vào phần "first" (train) SAU khi random split — đảm bảo
+       mỗi lớp có ≥ 1 mẫu ở train "nếu có thể".
+    4. Nếu cả stratified lẫn random đều fail (rất hiếm), raise rõ ràng.
+
+    Args
+    ----
+    idx_pool : np.ndarray
+        Index gốc sẽ được tách.
+    y_pool : np.ndarray
+        Nhãn tương ứng (cùng độ dài ``idx_pool``).
+    test_size : float
+        Tỉ lệ phần "second" (vd 0.30 cho train vs rest).
+    seed : int
+        Seed cho sklearn.
+    context : str
+        Nhãn ngữ cảnh (vd "split_edge_masks: step1 train vs rest") — chỉ
+        để in warning cho dễ debug.
+    force_into_first : np.ndarray | None
+        Index PHẢI nằm trong phần "first" (train). Hữu ích cho singleton
+        (count=1): chỉ có 1 chỗ để đi là train.
+
+    Returns
+    -------
+    (idx_first, idx_second)
+    """
+    n = len(idx_pool)
+    if n == 0:
+        return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+    unique, counts = np.unique(y_pool, return_counts=True)
+    n_classes = len(unique)
+    min_count = int(counts.min()) if n_classes > 0 else 0
+
+    # Quyết định stratify được không
+    use_stratify = (n_classes > 0) and (min_count >= 2)
+
+    if not use_stratify and n_classes > 0:
+        # In cảnh báo 1 LẦN — liệt kê TẤT CẢ lớp hiếm
+        rare_pairs = [
+            (int(c), int(cnt))
+            for c, cnt in zip(unique, counts)
+            if cnt < 2
+        ]
+        rare_str = ", ".join(f"class {c} (n={n_})" for c, n_ in rare_pairs)
+        ctx = f" [{context}]" if context else ""
+        n_singleton = sum(n_ for _, n_ in rare_pairs)
+        force_msg = (
+            f" {len(force_into_first)} mẫu singleton sẽ bị ÉP vào phần FIRST."
+            if force_into_first is not None and len(force_into_first) > 0
+            else ""
+        )
+        print(
+            f"[safe_stratified_split]{ctx} ⚠ Có {len(rare_pairs)} lớp < 2 mẫu → "
+            f"fallback sang random split (stratify=None). "
+            f"Lớp hiếm: [{rare_str}]. "
+            f"Tổng {n_singleton} mẫu singleton.{force_msg} "
+            f"Đây là giới hạn dữ liệu, KHÔNG phải lỗi — sẽ ghi vào báo cáo."
+        )
+
+    # Thử stratified trước
+    if use_stratify:
+        try:
+            idx_first, idx_second = train_test_split(
+                idx_pool,
+                test_size=test_size,
+                stratify=y_pool,
+                random_state=seed,
+            )
+            if force_into_first is not None and len(force_into_first) > 0:
+                # Nếu forced index đã lọt vào idx_second, dời nó sang first.
+                force_set = set(int(x) for x in force_into_first)
+                idx_second = np.array(
+                    [int(x) for x in idx_second if int(x) not in force_set],
+                    dtype=np.int64,
+                )
+                idx_first = np.unique(
+                    np.concatenate([idx_first, force_into_first])
+                )
+            return idx_first, idx_second
+        except ValueError:
+            # Defensive — không nên xảy ra nếu min_count >= 2
+            print(
+                f"[safe_stratified_split]{(' ['+context+']') if context else ''} "
+                f"⚠ Stratify bất ngờ fail dù min_count={min_count}>=2, "
+                f"fallback random."
+            )
+
+    # Fallback: random split (stratify=None)
+    idx_first, idx_second = train_test_split(
+        idx_pool,
+        test_size=test_size,
+        random_state=seed,
+    )
+    if force_into_first is not None and len(force_into_first) > 0:
+        # Nếu forced index đã lọt vào idx_second, dời nó sang first.
+        force_set = set(int(x) for x in force_into_first)
+        idx_second = np.array(
+            [int(x) for x in idx_second if int(x) not in force_set],
+            dtype=np.int64,
+        )
+        idx_first = np.unique(
+            np.concatenate([idx_first, force_into_first])
+        )
+    return idx_first, idx_second
+
+
 def split_edge_masks(
     edge_label: torch.Tensor,
     train_ratio: float = 0.70,
@@ -125,15 +258,23 @@ def split_edge_masks(
     """
     Stratified split theo ``edge_label`` thành 3 boolean mask [E].
 
-    Dùng 2 lần ``train_test_split``:
+    Dùng 2 lần ``safe_stratified_split``:
         1) train vs (val+test)    — tỉ lệ (1 - train_ratio).
         2) val vs test (trong rest) — tỉ lệ val/(val+test).
+
+    Chịu được lớp cực hiếm
+    -----------------------
+    Nếu BẤT KỲ lớp nào có < 2 mẫu (vd Okiru-Attack chỉ 1-3 flow toàn
+    dataset), hàm KHÔNG crash — fallback sang random split (stratify=None)
+    VÀ in cảnh báo liệt kê lớp hiếm + số mẫu (để ghi vào báo cáo là
+    giới hạn dữ liệu, không phải lỗi). Mọi singleton (count=1) được ÉP
+    vào tập train để model còn thấy lớp đó khi học.
 
     Args
     ----
     edge_label : [E] long tensor.
     train_ratio, val_ratio, test_ratio : tỉ lệ, phải cộng = 1.0.
-    seed : seed cho sklearn stratified split.
+    seed : seed cho sklearn.
 
     Returns
     -------
@@ -146,28 +287,52 @@ def split_edge_masks(
         )
     y = edge_label.detach().cpu().numpy()
     idx_all = np.arange(len(y))
+    E = len(y)
 
-    # Bước 1: train vs (val+test).
-    idx_train, idx_rest = train_test_split(
-        idx_all,
+    # Tìm singleton (count == 1) trong edge_label.
+    # Singleton BUỘC vào train vì chỉ có 1 chỗ để đi.
+    unique_all, counts_all = np.unique(y, return_counts=True)
+    singleton_classes = unique_all[counts_all == 1]
+    singleton_indices = np.where(np.isin(y, singleton_classes))[0]
+    pool_mask = ~np.isin(idx_all, singleton_indices)
+    idx_pool = idx_all[pool_mask]
+    y_pool = y[pool_mask]
+
+    # Bước 1: train vs (val+test) trên pool (đã loại singleton).
+    idx_train_pool, idx_rest = safe_stratified_split(
+        idx_pool,
+        y_pool,
         test_size=(1.0 - train_ratio),
-        stratify=y,
-        random_state=seed,
+        seed=seed,
+        context="step1 train vs rest",
+        force_into_first=singleton_indices,
+    )
+    # Gộp singleton vào train (an toàn: singleton không có trong idx_rest).
+    idx_train = np.unique(
+        np.concatenate([idx_train_pool, singleton_indices])
     )
 
     # Bước 2: val vs test trên phần còn lại.
     val_frac_of_rest = val_ratio / (val_ratio + test_ratio)
     y_rest = y[idx_rest]
-    idx_val, idx_test = train_test_split(
+    idx_val, idx_test = safe_stratified_split(
         idx_rest,
+        y_rest,
         test_size=(1.0 - val_frac_of_rest),
-        stratify=y_rest,
-        random_state=seed,
+        seed=seed,
+        context="step2 val vs test",
+        force_into_first=None,   # KHÔNG ép thêm — singleton đã vào train
     )
 
-    train_mask = torch.zeros(len(y), dtype=torch.bool)
-    val_mask = torch.zeros(len(y), dtype=torch.bool)
-    test_mask = torch.zeros(len(y), dtype=torch.bool)
+    # Sanity: 3 tập rời nhau, hợp = idx_all
+    assert len(idx_train) + len(idx_val) + len(idx_test) == E, (
+        f"split_edge_masks: tổng split ({len(idx_train)+len(idx_val)+len(idx_test)}) "
+        f"!= E ({E})."
+    )
+
+    train_mask = torch.zeros(E, dtype=torch.bool)
+    val_mask = torch.zeros(E, dtype=torch.bool)
+    test_mask = torch.zeros(E, dtype=torch.bool)
     train_mask[idx_train] = True
     val_mask[idx_val] = True
     test_mask[idx_test] = True

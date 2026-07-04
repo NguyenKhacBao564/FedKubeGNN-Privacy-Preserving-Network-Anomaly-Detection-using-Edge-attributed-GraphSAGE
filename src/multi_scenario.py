@@ -70,8 +70,8 @@ import torch
 import torch.nn as nn
 import yaml
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
-from sklearn.model_selection import train_test_split
 from torch_geometric.data import Data
+from src.train import safe_stratified_split
 
 # ---- sys.path setup ------------------------------------------------------
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -385,16 +385,37 @@ def _compute_val_mask(
     seed: int,
 ) -> torch.Tensor:
     """
-    10% stratified mask [E] dùng cho early stopping (val).
+    10% val mask [E] dùng cho early stopping (val).
 
-    Tách 90/10 stratified theo edge_label.
+    Tách 90/10 stratified theo ``edge_label``. Chịu được lớp cực hiếm
+    (vd Okiru) — nếu có lớp < 2 mẫu, fallback random split + in cảnh báo
+    (xem ``safe_stratified_split`` trong ``src.train``).
     """
     y = edge_label.detach().cpu().numpy()
     idx_all = np.arange(len(y))
-    _, idx_val = train_test_split(
-        idx_all, test_size=val_ratio, stratify=y, random_state=seed,
+    E = len(y)
+
+    # Tìm singleton trong edge_label (count == 1) → ÉP vào phần TRAIN
+    # (chỉ có 1 chỗ để đi, không thể vào val 10%).
+    unique_all, counts_all = np.unique(y, return_counts=True)
+    singleton_classes = unique_all[counts_all == 1]
+    singleton_indices = np.where(np.isin(y, singleton_classes))[0]
+    pool_mask = ~np.isin(idx_all, singleton_indices)
+    idx_pool = idx_all[pool_mask]
+    y_pool = y[pool_mask]
+
+    # Tách 90/10 trên pool. idx_first (train) bị DISCARD; idx_second (val)
+    # là cái ta cần.
+    _, idx_val = safe_stratified_split(
+        idx_pool,
+        y_pool,
+        test_size=val_ratio,
+        seed=seed,
+        context=f"_compute_val_mask (E={E})",
+        force_into_first=singleton_indices,
     )
-    val_mask = torch.zeros(len(y), dtype=torch.bool)
+
+    val_mask = torch.zeros(E, dtype=torch.bool)
     val_mask[idx_val] = True
     return val_mask
 
