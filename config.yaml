@@ -77,6 +77,12 @@ training:
   grad_clip: 1.0        # clip norm để tránh exploding gradient khi loss mất cân bằng.
   early_stop_patience: 10
   optimizer: adam       # "adam" | "adamw"
+  # Tỉ lệ split edge masks (per scenario, transductive). Áp dụng cho cả
+  # protocol per_scenario và pooled (mỗi graph trong pool tự split với
+  # cùng seed → công bằng). LOSO dùng riêng val_ratio bên dưới.
+  train_ratio: 0.70
+  val_ratio: 0.10
+  test_ratio: 0.20
 
 imbalance:
   # "class_weight" → dùng weighted CE loss (khuyến nghị).
@@ -90,3 +96,55 @@ reproducibility:
 logging:
   level: INFO          # DEBUG | INFO | WARNING | ERROR
   log_every_n_epochs: 1
+
+# -------- 4. Orchestrator thí nghiệm (run_experiments) --------
+
+experiments:
+  # 3 protocol mặc định. Mỗi protocol ra 1 bộ bảng Phase A + Phase B.
+  #   - 'per_scenario': train+eval riêng từng scenario (transductive split).
+  #   - 'pooled'      : train 1 model trên union các graph, eval trên union
+  #                     test_mask (= 'mô hình tập trung' so với FL GĐ2).
+  #   - 'loso'        : Leave-One-Scenario-Out inductive (multi_scenario).
+  protocols: [per_scenario, pooled, loso]
+
+  # Số epoch tối đa + early-stopping patience. Tất cả model trong 1 phase
+  # dùng CHUNG max_epochs + patience + seed + split (công bằng).
+  # Baseline đơn giản tự hội tụ sớm & dừng; phức tạp chạy lâu hơn.
+  # 150 epoch đủ cho dataset ~5K-10K dòng/lớp trên GPU vast.ai (RTX 3090).
+  max_epochs: 150
+  patience: 20
+
+  # Cap số flow mỗi lớp khi load (giúp RAM ổn với file lớn như 39-1 ~10GB).
+  # None = đọc nguyên. Trên smoke test local, đặt nhỏ để chạy nhanh.
+  # GỢI Ý SAU KHI EDA (xem scripts/eda_all_scenarios.py):
+  #   • Nếu RAM thoải mái (≥ 32GB): tăng lên 20000-50000 để có kết quả tốt hơn.
+  #   • Nếu OOM hoặc GPU chậm: giữ 5000-10000.
+  cap_per_class: 10000
+
+  # Danh sách scenario ĐẦY ĐỦ 6 cái (dùng cho lần chạy thật trên vast.ai).
+  # Khi smoke-test local, có thể override bằng ``--scenarios name=PATH ...``.
+  # ``name`` là key dùng trong báo cáo; ``path`` là tới conn.log.labeled.
+  # Lưu ý: scenario 39-1 (IRCBot) rất nặng ~10GB → giữ cap_per_class ở trên.
+  scenarios:
+    - name: 34-1
+      path: data/CTU-IoT-Malware-Capture-34-1/conn.log.labeled
+      malware: Mirai
+    - name: 1-1
+      path: data/CTU-IoT-Malware-Capture-1-1/conn.log.labeled
+      malware: Hide-and-Seek
+    - name: 3-1
+      path: data/CTU-IoT-Malware-Capture-3-1/conn.log.labeled
+      malware: Muhstik
+    - name: 9-1
+      path: data/CTU-IoT-Malware-Capture-9-1/conn.log.labeled
+      malware: Linux.Hajime
+    - name: 36-1
+      path: data/CTU-IoT-Malware-Capture-36-1/conn.log.labeled
+      malware: Okiru
+    - name: 39-1
+      path: data/CTU-IoT-Malware-Capture-39-1/conn.log.labeled
+      malware: IRCBot
+
+  # Thư mục output (CSV + confusion matrix PNG + checkpoint).
+  # run_experiments sẽ tạo thêm sub-dir ``checkpoints/`` bên trong.
+  out_dir: artifacts/experiments
