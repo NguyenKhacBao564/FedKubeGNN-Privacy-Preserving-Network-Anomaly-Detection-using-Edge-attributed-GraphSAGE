@@ -218,6 +218,8 @@ ls -la artifacts/experiments/
 
 ## Tài liệu tham chiếu
 
+- **[Báo cáo Giai đoạn 1](docs/PHASE1_REPORT.md)** — kết quả thực nghiệm, phân tích, phát hiện chính
+- **[Tài liệu bàn giao Giai đoạn 2](docs/HANDOFF_PHASE2.md)** — hướng dẫn cho người làm Federated Learning
 - Quyết định thiết kế, quy tắc tiền xử lý, mô hình: xem `CLAUDE.md`.
 - Dataset: <https://mcfp.felk.cvut.cz/publicDatasets/IoT-23-Dataset/>
 - PyTorch Geometric: <https://pytorch-geometric.readthedocs.io/>
