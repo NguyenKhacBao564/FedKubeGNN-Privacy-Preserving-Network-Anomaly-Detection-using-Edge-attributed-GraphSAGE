@@ -135,6 +135,147 @@ MODEL_POOL: List[str] = [
 
 
 # ============================================================================
+# DataCache — tránh lặp lại load/clean/build khi cùng khóa dữ liệu
+# ============================================================================
+
+class DataCache:
+    """
+    Cache in-memory cho DataFrames sạch và PyG Data đã build.
+
+    **Bài toán**: ``run_per_scenario`` / ``run_pooled`` / ``run_loso`` đều
+    gọi ``load_all_scenarios`` (đọc conn.log.labeled + clean) MỖI LẦN chạy
+    một config (model, imbalance_mode). Trong thực tế Phase A chạy 3 modes,
+    Phase B chạy 5 models trên CÙNG mode → đọc sạch lặp lại 8 lần.
+    Đặc biệt scenario 39-1 (10GB) mất hàng chục phút mỗi lần đọc → đây
+    là bottleneck chính, không phải training.
+
+    **Cache 2 tầng**:
+
+    1. ``all_dfs`` (clean DataFrames — kết quả ``load_all_scenarios``):
+       Key: ``(frozenset(scenario_paths), cap_per_class, chunksize)``.
+       Vì tất cả protocol/phases dùng cùng bộ scenarios + cùng cap.
+
+    2. ``graph`` (PyG Data — kết quả transform + undersample + build_graph):
+       Key: ``(scenario_name, imbalance_mode, cap_per_class)``.
+       Phase B (5 model × cùng winner_mode) dùng cùng graph per scenario.
+
+    KHÔNG lưu disk (in-memory only) — cache mất khi kết thúc tiến trình.
+    Không cần gitignore thêm vì không tạo file.
+    """
+
+    def __init__(self) -> None:
+        self._clean_dfs: Dict[Tuple, Dict[str, Any]] = {}
+        self._graphs: Dict[Tuple, Any] = {}
+        self._stats: Dict[str, int] = {
+            "clean_hit": 0, "clean_miss": 0,
+            "graph_hit": 0, "graph_miss": 0,
+        }
+
+    # ---- Tier 1: clean DataFrames ----
+
+    def get_clean_dfs(
+        self,
+        scenario_paths: Dict[str, str],
+        cap_per_class: Optional[int],
+        chunksize: int,
+    ) -> Dict[str, Any]:
+        """
+        Trả ``Dict[str, pd.DataFrame]`` — clean DataFrames per scenario.
+
+        Nếu đã cache (cùng ``scenario_paths`` + ``cap_per_class`` +
+        ``chunksize``) → trả ngay, KHÔNG đọc lại từ đĩa.
+        """
+        key: Tuple = (
+            frozenset(scenario_paths.items()),
+            cap_per_class,
+            chunksize,
+        )
+        if key in self._clean_dfs:
+            self._stats["clean_hit"] += 1
+            print(f"    [CACHE HIT] clean_dfs (cap={cap_per_class}) — "
+                  f"bỏ qua load+clean ({len(self._clean_dfs[key])} scenarios).")
+            return self._clean_dfs[key]
+
+        self._stats["clean_miss"] += 1
+        print(f"    [CACHE MISS] clean_dfs (cap={cap_per_class}) — "
+              f"đang load+clean {len(scenario_paths)} scenarios ...")
+        t0 = time.perf_counter()
+        from src.multi_scenario import load_all_scenarios
+        dfs = load_all_scenarios(
+            scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
+        )
+        dt = time.perf_counter() - t0
+        print(f"    [CACHE MISS] clean_dfs xong trong {dt:.1f}s.")
+        self._clean_dfs[key] = dfs
+        return dfs
+
+    # ---- Tier 2: PyG Data (graph) ----
+
+    def get_graph(
+        self,
+        scenario_name: str,
+        imbalance_mode: str,
+        cap_per_class: Optional[int],
+        build_fn: Any,
+    ) -> Any:
+        """
+        Trả ``torch_geometric.data.Data`` đã build.
+
+        ``build_fn`` là callable ``() -> Data`` sẽ được gọi CHỈ KHI cache miss
+        (để tránh import phụ thuộc trong class).
+
+        Key = ``(scenario_name, imbalance_mode, cap_per_class)``.
+        """
+        key: Tuple = (scenario_name, imbalance_mode, cap_per_class)
+        if key in self._graphs:
+            self._stats["graph_hit"] += 1
+            g = self._graphs[key]
+            E = int(g.edge_index.shape[1]) if hasattr(g, "edge_index") else 0
+            print(f"      [CACHE HIT] graph({scenario_name}, {imbalance_mode}) "
+                  f"— E={E}.")
+            return g
+
+        self._stats["graph_miss"] += 1
+        data = build_fn()
+        E = int(data.edge_index.shape[1]) if hasattr(data, "edge_index") else 0
+        print(f"      [CACHE MISS] graph({scenario_name}, {imbalance_mode}) "
+              f"— E={E} (đã build mới).")
+        self._graphs[key] = data
+        return data
+
+    # ---- Stats ----
+
+    def print_stats(self) -> None:
+        """In thống kê cache hit/miss cuối run."""
+        s = self._stats
+        total_clean = s["clean_hit"] + s["clean_miss"]
+        total_graph = s["graph_hit"] + s["graph_miss"]
+        print(
+            f"\n  [CACHE STATS] clean_dfs: {s['clean_hit']}/{total_clean} hits "
+            f"({s['clean_miss']} misses)  |  "
+            f"graph: {s['graph_hit']}/{total_graph} hits "
+            f"({s['graph_miss']} misses)"
+        )
+        if s["clean_miss"] > 0:
+            print(
+                f"           → {s['clean_miss']} lần load+clean từ đĩa (lần đầu)"
+            )
+        if s["clean_hit"] > 0:
+            print(
+                f"           → {s['clean_hit']} lần skip load+clean (cache hit) ✓"
+            )
+
+    def clear_graphs(self) -> None:
+        """Xóa tier 2 (graph cache) giữ nguyên tier 1. Dùng khi muốn rebuild graph."""
+        n = len(self._graphs)
+        self._graphs.clear()
+        self._stats["graph_hit"] = 0
+        self._stats["graph_miss"] = 0
+        if n > 0:
+            print(f"  [CACHE] Đã xóa {n} graph cache (tier 2).")
+
+
+# ============================================================================
 # Resume helpers — đọc / ghi results_summary.csv incremental
 # ============================================================================
 
@@ -323,6 +464,7 @@ def run_per_scenario(
     epochs_override: Optional[int] = None,
     cap_per_class: Optional[int] = None,
     chunksize: int = 100_000,
+    data_cache: Optional[DataCache] = None,
 ) -> pd.DataFrame:
     """
     Với MỖI scenario:
@@ -341,7 +483,11 @@ def run_per_scenario(
     from src.evaluate import evaluate_model
 
     # ---- Load + clean (CHUNG cho cả phase) ----
-    if cap_per_class is not None:
+    if data_cache is not None:
+        all_dfs = data_cache.get_clean_dfs(
+            scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
+        )
+    elif cap_per_class is not None:
         all_dfs = load_all_scenarios(
             scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
         )
@@ -365,15 +511,23 @@ def run_per_scenario(
         t0 = time.perf_counter()
         _set_seed(seed)
 
-        df_feat = transform(all_dfs[sname], preprocessor)
-        df_for_graph = _maybe_undersample(df_feat, imbalance_mode, seed)
+        # --- Graph cache (tier 2): transform + undersample + build_graph ---
+        def _build_one_graph(_sname=sname, _mode=imbalance_mode):
+            df_feat = transform(all_dfs[_sname], preprocessor)
+            df_for_graph = _maybe_undersample(df_feat, _mode, seed)
+            return build_graph(
+                df_for_graph,
+                class_to_idx=class_to_idx,
+                feature_columns=preprocessor.feature_columns,
+            )
 
-        # Build graph dùng SHARED class_to_idx.
-        data = build_graph(
-            df_for_graph,
-            class_to_idx=class_to_idx,
-            feature_columns=preprocessor.feature_columns,
-        )
+        if data_cache is not None:
+            data = data_cache.get_graph(
+                sname, imbalance_mode, cap_per_class,
+                build_fn=_build_one_graph,
+            )
+        else:
+            data = _build_one_graph()
 
         # weight_tensor nếu class_weight
         wt: Optional[torch.Tensor] = None
@@ -463,6 +617,7 @@ def run_pooled(
     epochs_override: Optional[int] = None,
     cap_per_class: Optional[int] = None,
     chunksize: int = 100_000,
+    data_cache: Optional[DataCache] = None,
 ) -> pd.DataFrame:
     """
     Train 1 model trên UNION của NHIỀU graph; eval trên union test_mask.
@@ -487,7 +642,11 @@ def run_pooled(
     device = get_device()
 
     # ---- Load ----
-    if cap_per_class is not None:
+    if data_cache is not None:
+        all_dfs = data_cache.get_clean_dfs(
+            scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
+        )
+    elif cap_per_class is not None:
         all_dfs = load_all_scenarios(
             scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
         )
@@ -505,7 +664,7 @@ def run_pooled(
     val_ratio = float(tr_cfg.get("val_ratio", 0.10))
     test_ratio = float(tr_cfg.get("test_ratio", 0.20))
 
-    # ---- Build graphs ----
+    # ---- Build graphs (with cache) ----
     graphs: Dict[str, Any] = {}
     weight_tensor: Optional[torch.Tensor] = None
 
@@ -517,13 +676,22 @@ def run_pooled(
         weight_tensor = _build_weight_tensor(labels_union, class_to_idx, K)
 
     for n in sorted(scenario_paths.keys()):
-        df_feat = transform(all_dfs[n], preprocessor)
-        df_for_graph = _maybe_undersample(df_feat, imbalance_mode, seed)
-        graphs[n] = build_graph(
-            df_for_graph,
-            class_to_idx=class_to_idx,
-            feature_columns=preprocessor.feature_columns,
-        )
+        # --- Graph cache (tier 2) ---
+        def _build_pooled_graph(_n=n):
+            df_feat = transform(all_dfs[_n], preprocessor)
+            df_for_graph = _maybe_undersample(df_feat, imbalance_mode, seed)
+            return build_graph(
+                df_for_graph,
+                class_to_idx=class_to_idx,
+                feature_columns=preprocessor.feature_columns,
+            )
+
+        if data_cache is not None:
+            graphs[n] = data_cache.get_graph(
+                n, imbalance_mode, cap_per_class, build_fn=_build_pooled_graph,
+            )
+        else:
+            graphs[n] = _build_pooled_graph()
 
     # ---- Edge masks per graph ----
     for g in graphs.values():
@@ -731,9 +899,17 @@ def run_loso_protocol(
     epochs_override: Optional[int] = None,
     cap_per_class: Optional[int] = None,
     chunksize: int = 100_000,
+    data_cache: Optional[DataCache] = None,
 ) -> pd.DataFrame:
     """Wrap ``multi_scenario.run_loso``; augment + reorder DataFrame."""
     from src.multi_scenario import run_loso as ms_run_loso
+
+    # Nếu cache có preloaded clean dfs → truyền vào LOSO để skip load_all_scenarios.
+    preloaded_dfs = None
+    if data_cache is not None:
+        preloaded_dfs = data_cache.get_clean_dfs(
+            scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
+        )
 
     df = ms_run_loso(
         scenario_paths=scenario_paths,
@@ -747,6 +923,7 @@ def run_loso_protocol(
         seed=seed,
         out_dir=save_dir,
         verbose=False,
+        preloaded_clean_dfs=preloaded_dfs,
     )
 
     # run_loso trả DataFrame với các cột: held_out, macro_f1, weighted_f1,
@@ -804,6 +981,7 @@ def run_phase_a(
     cap_per_class: Optional[int],
     chunksize: int,
     skip_keys: Optional[Set[Tuple[str, str, str, str]]] = None,
+    data_cache: Optional[DataCache] = None,
 ) -> Tuple[pd.DataFrame, str]:
     """
     Phase A: egraphsage × 3 imbalance_mode.
@@ -839,6 +1017,7 @@ def run_phase_a(
                 class_to_idx, seed=seed, save_dir=save_dir,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         elif protocol == "pooled":
             df = run_pooled(
@@ -846,6 +1025,7 @@ def run_phase_a(
                 class_to_idx, seed=seed, save_dir=save_dir,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         elif protocol == "loso":
             df = run_loso_protocol(
@@ -853,6 +1033,7 @@ def run_phase_a(
                 seed=seed, save_dir=save_dir, config_path=config_path,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         else:
             raise ValueError(f"protocol không hỗ trợ: {protocol}")
@@ -912,6 +1093,7 @@ def run_phase_b(
     chunksize: int,
     winning_mode: str,
     skip_keys: Optional[Set[Tuple[str, str, str, str]]] = None,
+    data_cache: Optional[DataCache] = None,
 ) -> pd.DataFrame:
     """
     Phase B: cố định winning_mode × 5 model.
@@ -942,6 +1124,7 @@ def run_phase_b(
                 class_to_idx, seed=seed, save_dir=save_dir,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         elif protocol == "pooled":
             df = run_pooled(
@@ -949,6 +1132,7 @@ def run_phase_b(
                 class_to_idx, seed=seed, save_dir=save_dir,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         elif protocol == "loso":
             df = run_loso_protocol(
@@ -956,6 +1140,7 @@ def run_phase_b(
                 seed=seed, save_dir=save_dir, config_path=config_path,
                 epochs_override=epochs_override,
                 cap_per_class=cap_per_class, chunksize=chunksize,
+                data_cache=data_cache,
             )
         else:
             raise ValueError(f"protocol không hỗ trợ: {protocol}")
@@ -1059,6 +1244,16 @@ def run_all(
     all_dfs = load_all_scenarios(
         scenario_paths, cap_per_class=cap_per_class, chunksize=chunksize,
     )
+    # Khởi tạo DataCache: pre-populate với all_dfs vừa load để các call site
+    # sau (per_scenario, pooled, loso) đều thấy cache HIT, không load lại.
+    data_cache = DataCache()
+    # Tự ghi vào tier 1 (bypass miss path) — dùng cùng key như get_clean_dfs.
+    _cache_key: Tuple = (
+        frozenset(scenario_paths.items()), cap_per_class, chunksize,
+    )
+    data_cache._clean_dfs[_cache_key] = all_dfs
+    data_cache._stats["clean_hit"] = 0
+    data_cache._stats["clean_miss"] = 0
     class_to_idx = build_shared_class_to_idx(all_dfs)
     K = len(class_to_idx)
     if verbose:
@@ -1147,6 +1342,7 @@ def run_all(
                 epochs_override=epochs_override, cap_per_class=cap_per_class,
                 chunksize=chunksize,
                 skip_keys=skip_keys,
+                data_cache=data_cache,
             )
             # Save Phase A CSV
             csv_a = os.path.join(
@@ -1171,6 +1367,7 @@ def run_all(
             epochs_override=epochs_override, cap_per_class=cap_per_class,
             chunksize=chunksize, winning_mode=winning_mode,
             skip_keys=skip_keys,
+            data_cache=data_cache,
         )
         # Save Phase B CSV
         csv_b = os.path.join(
@@ -1198,7 +1395,11 @@ def run_all(
                 f"({len(summary_records)} dòng tổng cộng)."
             )
 
-    # ---- 3) results_summary.csv ----
+    # ---- 3) Cache stats ----
+    if verbose:
+        data_cache.print_stats()
+
+    # ---- 4) results_summary.csv ----
     summary_path = _save_summary_csv(summary_records, out_dir)
     df_summary = pd.DataFrame(summary_records)
 

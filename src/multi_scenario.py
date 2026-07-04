@@ -442,6 +442,7 @@ def run_loso(
     seed: Optional[int] = None,
     out_dir: str = "artifacts/loso",
     verbose: bool = True,
+    preloaded_clean_dfs: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> pd.DataFrame:
     """
     Leave-One-Scenario-Out inductive: train trên N-1 scenario, test trên
@@ -501,6 +502,10 @@ def run_loso(
     out_dir : str
         Thư mục lưu CSV + confusion matrix PNG.
     verbose : bool
+    preloaded_clean_dfs : dict | None
+        Nếu được cung cấp (từ ``DataCache``), BỎ QUA ``load_all_scenarios``
+        và dùng trực tiếp dict này. Tránh đọc + clean lặp lại khi chạy nhiều
+        model trên cùng bộ scenarios.
 
     Returns
     -------
@@ -569,24 +574,39 @@ def run_loso(
         print()
 
     # ---- Load + clean tất cả scenario MỘT LẦN ----
-    t_load0 = time.perf_counter()
-    all_dfs = load_all_scenarios(
-        scenario_paths,
-        cap_per_class=cap_per_class,
-        chunksize=chunksize,
-    )
-    if verbose:
-        print(
-            f"[load_all_scenarios] {len(all_dfs)} scenarios trong "
-            f"{time.perf_counter() - t_load0:.2f}s."
-        )
-        for n in scenario_names:
-            df = all_dfs[n]
+    if preloaded_clean_dfs is not None:
+        all_dfs = preloaded_clean_dfs
+        if verbose:
             print(
-                f"  {n:<35s}  {df.shape[0]:>8,} dòng   "
-                f"({df['detailed-label'].nunique()} lớp)"
+                f"[LOSO] Dùng preloaded clean dfs ({len(all_dfs)} scenarios, "
+                f"KHÔNG load lại từ đĩa)."
             )
-        print()
+            for n in scenario_names:
+                df = all_dfs[n]
+                print(
+                    f"  {n:<35s}  {df.shape[0]:>8,} dòng   "
+                    f"({df['detailed-label'].nunique()} lớp)"
+                )
+            print()
+    else:
+        t_load0 = time.perf_counter()
+        all_dfs = load_all_scenarios(
+            scenario_paths,
+            cap_per_class=cap_per_class,
+            chunksize=chunksize,
+        )
+        if verbose:
+            print(
+                f"[load_all_scenarios] {len(all_dfs)} scenarios trong "
+                f"{time.perf_counter() - t_load0:.2f}s."
+            )
+            for n in scenario_names:
+                df = all_dfs[n]
+                print(
+                    f"  {n:<35s}  {df.shape[0]:>8,} dòng   "
+                    f"({df['detailed-label'].nunique()} lớp)"
+                )
+            print()
 
     # ---- class_to_idx CHUNG (một lần duy nhất) ----
     shared_class_to_idx = build_shared_class_to_idx(all_dfs)
