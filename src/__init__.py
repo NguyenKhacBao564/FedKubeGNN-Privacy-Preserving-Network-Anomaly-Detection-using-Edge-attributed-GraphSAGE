@@ -1,0 +1,1 @@
+"""FedKubeGNN application package."""

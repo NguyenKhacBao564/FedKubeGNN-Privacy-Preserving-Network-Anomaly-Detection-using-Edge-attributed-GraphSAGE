@@ -76,3 +76,6 @@ nohup.out
 # --- Explicitly allowed files ---
 !CLAUDE.md
 !README.md
+# Harness core maintenance binary
+scripts/bin/harness
+scripts/bin/harness.exe

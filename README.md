@@ -4,11 +4,14 @@
 *Phát hiện hành vi độc hại trong Kubernetes bằng Federated Learning + GNN
 trên bộ dữ liệu IoT-23.*
 
-Repo này phục vụ **Giai đoạn 1** do **Nguyễn Khắc Bảo** phụ trách: tiền xử lý
+Repo chứa baseline **Giai đoạn 1** do **Nguyễn Khắc Bảo** phụ trách: tiền xử lý
 IoT-23 → dựng đồ thị hành vi → huấn luyện **E-GraphSAGE** + 4 baseline
-(`gat`, `sage_edge_concat`, `graphsage`, `gcn`) tập trung trên 1 máy,
-làm **mốc hiệu năng cơ sở (baseline)** để Giai đoạn 2 (Federated Learning)
-so sánh.
+(`gat`, `sage_edge_concat`, `graphsage`, `gcn`) tập trung trên 1 máy.
+
+Nền tảng **Giai đoạn 2** nằm trong `src/federated/` và được thiết kế như một
+boundary độc lập: core FedAvg/metrics và Flower runtime không phụ thuộc PyG hay
+implementation Phase 1. Xem [kiến trúc Phase 2](docs/PHASE2_ARCHITECTURE.md)
+trước khi nối dữ liệu/model thật.
 
 ## Cấu trúc repo
 
@@ -221,6 +224,7 @@ ls -la artifacts/phase1_results/
 
 - **[Báo cáo Giai đoạn 1](docs/PHASE1_REPORT.md)** — kết quả thực nghiệm, phân tích, phát hiện chính
 - **[Tài liệu bàn giao Giai đoạn 2](docs/HANDOFF_PHASE2.md)** — hướng dẫn cho người làm Federated Learning
+- **[Kiến trúc Phase 2](docs/PHASE2_ARCHITECTURE.md)** — contract, trust boundary, cách chạy và validation gates
 - Quyết định thiết kế, quy tắc tiền xử lý, mô hình: xem `CLAUDE.md`.
 - Dataset: <https://mcfp.felk.cvut.cz/publicDatasets/IoT-23-Dataset/>
 - PyTorch Geometric: <https://pytorch-geometric.readthedocs.io/>

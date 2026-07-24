@@ -1,5 +1,11 @@
 # Tài liệu Bàn giao — Giai đoạn 2: Federated Learning
 
+> **Ghi chú triển khai 2026-07-24:** đây là tài liệu bàn giao lịch sử từ Phase
+> 1 và không còn là runtime contract. Một số API/artifact mô tả bên dưới không
+> tồn tại trong repository hiện tại. Phase 2 phải dùng boundary fail-closed tại
+> [PHASE2_ARCHITECTURE.md](PHASE2_ARCHITECTURE.md) và xem Phase 1 như upstream
+> chưa được xác minh.
+
 > **Dành cho người phụ trách GĐ2** (Nguyễn Chí Hiếu hoặc thành viên khác).
 > Tóm tắt ngắn gọn những gì GĐ1 đã làm và những gì cần biết để bắt đầu GĐ2.
 
